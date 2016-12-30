@@ -1,11 +1,10 @@
 package org.anc.lapps.nlp4j;
 
-import edu.emory.mathcs.nlp.bin.NLPTrain;
-import edu.emory.mathcs.nlp.component.template.feature.Field;
-import edu.emory.mathcs.nlp.component.template.feature.Relation;
-import edu.emory.mathcs.nlp.component.template.feature.Source;
-import edu.emory.mathcs.nlp.component.template.util.NLPMode;
-import org.apache.commons.lang3.EnumUtils;
+import edu.emory.mathcs.nlp.bin.NLPDecode;
+import edu.emory.mathcs.nlp.bin.util.BinUtils;
+import edu.emory.mathcs.nlp.common.util.FileUtils;
+import edu.emory.mathcs.nlp.common.util.IOUtils;
+import edu.emory.mathcs.nlp.decode.NLPDecoder;
 import org.lappsgrid.api.ProcessingService;
 import org.lappsgrid.discriminator.Discriminators;
 import org.lappsgrid.metadata.IOSpecification;
@@ -18,7 +17,9 @@ import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.PatternSyntaxException;
 
@@ -27,7 +28,7 @@ import java.util.regex.PatternSyntaxException;
  */
 
 
-public class NLP4JCustomTrain implements ProcessingService
+public class NLP4JCustomDecode implements ProcessingService
 {
     /**
      * The Json String required by getMetadata()
@@ -35,19 +36,19 @@ public class NLP4JCustomTrain implements ProcessingService
     private String metadata;
     private Logger logger;
 
-    public NLP4JCustomTrain() { metadata = generateMetadata(); }
+    public NLP4JCustomDecode() { metadata = generateMetadata(); }
 
     private String generateMetadata()
     {
         ServiceMetadata metadata = new ServiceMetadata();
         metadata.setName(this.getClass().getName());
-        metadata.setDescription("The Train function from EmoryNLP's NLP4J project.");
+        metadata.setDescription("The Decode function from EmoryNLP's NLP4J project.");
         metadata.setVersion(Version.getVersion());
         metadata.setVendor("http://www.lappsgrid.org");
         metadata.setLicense(Discriminators.Uri.APACHE2);
 
         IOSpecification requires = new IOSpecification();
-        requires.addFormat(Discriminators.Uri.TSV);
+        requires.addFormat(Discriminators.Uri.TEXT);
         requires.setEncoding("UTF-8");
 
         IOSpecification produces = new IOSpecification();
@@ -95,7 +96,7 @@ public class NLP4JCustomTrain implements ProcessingService
     @Override
     public String execute(String input) {
 
-        logger = LoggerFactory.getLogger(NLP4JCustomTrain.class);
+        logger = LoggerFactory.getLogger(NLP4JCustomDecode.class);
 
         // Parse the JSON string into a Data object, and extract its discriminator.
         Data<String> data = Serializer.parse(input, Data.class);
@@ -130,22 +131,19 @@ public class NLP4JCustomTrain implements ProcessingService
             // the RankLib methods need directories for most of their processing, so the input
             // will be given within files in a directory, and the output will be read from files
             // in the output directory.
-            Path outputDirPath = null;
             Path inputDirPath = null;
             try
             {
-                outputDirPath = Files.createTempDirectory("output");
-                outputDirPath.toFile().deleteOnExit();
                 inputDirPath = Files.createTempDirectory("input");
                 inputDirPath.toFile().deleteOnExit();
             }
             // Since we are only handling files created by the function, there should never be
-            // a problem with these files. If there is, notify the user of the error.
+            // a problem with these files, thus the exception will get promoted to a RuntimeException.
             catch (IOException e)
             {
-                String errorData = generateError("Error in creating temporary input/output directories.");
+                String errorData = generateError("Error in handling of temporary files.");
                 logger.error(errorData);
-                return errorData;
+                throw new RuntimeException("A problem occurred in the handling of the temporary files.", e);
             }
 
             StringBuilder params = new StringBuilder("-c ");
@@ -216,60 +214,6 @@ public class NLP4JCustomTrain implements ProcessingService
                         return errorData;
                     }
 
-                    else if(configPath.contains("ALGORITHM ERROR"))
-                    {
-                        StringBuilder errorMsg = new StringBuilder("Invalid name given for optimizer algorithm.\r\n");
-                        String[] errorParts;
-                        errorParts = configPath.split(";");
-                        errorMsg.append("Given: ").append(errorParts[1]);
-
-                        String errorData = generateError(errorMsg.toString());
-                        logger.error(errorData);
-                        return errorData;
-                    }
-
-                    else if(configPath.contains("INVALID FEATURE SOURCE ERROR"))
-                    {
-                        StringBuilder errorMsg = new StringBuilder("Invalid source given for feature.\r\n");
-                        String[] errorParts;
-                        errorParts = configPath.split(";");
-                        errorMsg.append("Given: ").append(errorParts[1]);
-                        errorMsg.append("\r\nFeature line number: ").append(errorParts[2]);
-                        errorMsg.append("\r\nFeature number: f").append(errorParts[3]);
-
-                        String errorData = generateError(errorMsg.toString());
-                        logger.error(errorData);
-                        return errorData;
-                    }
-
-                    else if(configPath.contains("INVALID FEATURE RELATION ERROR"))
-                    {
-                        StringBuilder errorMsg = new StringBuilder("Invalid relation given for feature.\r\n");
-                        String[] errorParts;
-                        errorParts = configPath.split(";");
-                        errorMsg.append("Given: ").append(errorParts[1]);
-                        errorMsg.append("\r\nFeature line number: ").append(errorParts[2]);
-                        errorMsg.append("\r\nFeature number: f").append(errorParts[3]);
-
-                        String errorData = generateError(errorMsg.toString());
-                        logger.error(errorData);
-                        return errorData;
-                    }
-
-                    else if(configPath.contains("INVALID FEATURE FIELD ERROR"))
-                    {
-                        StringBuilder errorMsg = new StringBuilder("Invalid field given for feature.\r\n");
-                        String[] errorParts;
-                        errorParts = configPath.split(";");
-                        errorMsg.append("Given: ").append(errorParts[1]);
-                        errorMsg.append("\r\nFeature line number: ").append(errorParts[2]);
-                        errorMsg.append("\r\nFeature number: f").append(errorParts[3]);
-
-                        String errorData = generateError(errorMsg.toString());
-                        logger.error(errorData);
-                        return errorData;
-                    }
-
                     else
                     {
                         StringBuilder errorMsg = new StringBuilder("Unknown error found in configuration parameters.\r\n");
@@ -284,33 +228,16 @@ public class NLP4JCustomTrain implements ProcessingService
                 // Call the method that converts the parameters to the format that they would
                 // be in when given from command-line.
                 params.append(configPath);
-
-                String convertedParams = convertParameters(data, outputDirPath, inputDirPath).replace("\\", "/");
-
-                if(convertedParams.contains("ERROR"))
-                {
-                    if(convertedParams.contains("MODE ERROR"))
-                    {
-                        StringBuilder errorMsg = new StringBuilder("Invalid mode parameter given.\r\n");
-                        String[] errorParts;
-                        errorParts = configPath.split(";");
-                        errorMsg.append("Given: ").append(errorParts[1]);
-
-                        String errorData = generateError(errorMsg.toString());
-                        logger.error(errorData);
-                        return errorData;
-                    }
-                }
-
-                params.append(convertedParams);
+                //params.append("C:\\Users\\Alex\\research\\config-decode-en.xml");
+                params.append(convertParameters(data, inputDirPath).replace("\\", "/"));
             }
             // Since we are only handling files created by the function, there should never be
-            // a problem with these files. If there is notify
+            // a problem with these files, thus the exception will get promoted to a RuntimeException.
             catch (IOException e)
             {
                 String errorData = generateError("Error in handling of temporary files.");
                 logger.error(errorData);
-                return errorData;
+                throw new RuntimeException("A problem occurred in the handling of the temporary files.", e);
             }
             String[] paramsArray;
 
@@ -334,7 +261,10 @@ public class NLP4JCustomTrain implements ProcessingService
             // Set the special stream as the out stream
             System.setOut(ps);
 
-            NLPTrain.main(paramsArray);
+            //NLPDecode.main(paramsArray);
+
+            NLPDecode decodeTool = new NLPDecode(paramsArray);
+            decodeTool.notify();
 
             // Set System.out back to the original PrintStream
             System.out.flush();
@@ -343,23 +273,47 @@ public class NLP4JCustomTrain implements ProcessingService
             // Make a Map to hold both the printed, and file outputs.
             Map<String,String> outputPayload = new HashMap<>();
 
-            String finalPrint;
-
-            if(data.getParameter("saveModel") != null)
-            {
-                StringBuilder toRemove = new StringBuilder("Name not implemented for OnlineComponent. Input name - ");
-                toRemove.append(data.getParameter("saveModel")).append(".xz will be ignored.\r\n");
-                finalPrint = baos.toString().replace(toRemove.toString(), "");
-            }
-
-            else
-            {
-                finalPrint = baos.toString();
-            }
             // Add the printed text caught from the out stream to the payload
             // with the "Printed" key
 
-            outputPayload.put("Printed", finalPrint);
+            outputPayload.put("Printed", baos.toString());
+
+
+            // Process all the files in the input folder with the .nlp extension,
+            // to return them as part of the outputted Data object, and delete them
+            // from the temporary directory. The output files are in the input
+            // directory because the decode function automatically generate the files
+            // in the same directory. The .nlp extension is the default, and there is
+            // no need to include a parameter to change it so it will always remain so.
+            File inputFolder = new File(inputDirPath.toString());
+            File[] listOfFiles = inputFolder.listFiles();
+            int i = 0;
+            for (File file : listOfFiles)
+            {
+                if (file.isFile())
+                {
+                    // Get the filename, to serve as the key in the Map object, and
+                    // the content of the file to be put in the output
+                    String fileName = file.getName();
+                    if(fileName.contains(".out"))
+                    {
+                        try
+                        {
+                            i++;
+                            String fileContent = readFile(file.getAbsolutePath());
+                            outputPayload.put("output-file-" + i, fileContent);
+                            file.deleteOnExit();
+                        }
+                        catch(IOException e)
+                        {
+                            String errorData = generateError("Error in handling of output files.");
+                            logger.error(errorData);
+                            throw new RuntimeException("A problem occurred in the handling of the output files.", e);
+                        }
+
+                    }
+                }
+            }
 
             // Parse the Map to Json, then put it as a payload to a Data object with a LAPPS
             // discriminator and return it as the final output
@@ -376,22 +330,16 @@ public class NLP4JCustomTrain implements ProcessingService
      * to be given as input to the main classes.
      *
      * @param data A Data object
-     * @param outputDirPath A Path to the output directory
      * @param inputDirPath A Path to the input directory
      * @return A String representing the parameters of the Data object.
      */
-    protected String convertParameters(Data<String> data, Path outputDirPath, Path inputDirPath) throws IOException
+    private String convertParameters(Data<String> data, Path inputDirPath) throws IOException
     {
         StringBuilder params = new StringBuilder();
 
         // Get the payload and convert it back into a HashMap to get all input content from it.
         String payloadJson = data.getPayload();
         Map<String,String> payload = Serializer.parse(payloadJson, HashMap.class);
-
-        // This boolean for development will be set to true if at least one of the keys corresponds
-        // to a development file. This is needed since this is an optional parameter that might take
-        // multiple input files.
-        boolean developBool = false;
 
         // These are the parameters for training that give input.
         // Since the input can include many train and development files, we process
@@ -402,59 +350,23 @@ public class NLP4JCustomTrain implements ProcessingService
             // temporary file in the input directory. The entire directory will be given
             // as the train directory path, and the extension ".trn" will be specified
             // to distinguish the train files.
-            if (key.contains("train"))
+            if (key.contains("input"))
             {
                 String fileContent = payload.get(key);
-                writeTempFile(key, inputDirPath, fileContent, ".trn");
+                writeTempFile(key, inputDirPath, fileContent, ".input");
             }
-
-            // If the input file is a development file, we take its content and save it to a
-            // temporary file in the input directory, after setting the boolean to true.
-            // The entire directory will be given as the development directory path and the
-            // extension ".dev" will be specified to distinguish the development files.
-            else if (key.contains("develop"))
-            {
-                developBool = true;
-                String fileContent = payload.get(key);
-                writeTempFile(key, inputDirPath, fileContent, ".dev");
-            }
-
-            // TODO: Add prev for previously trained models: -p
         }
 
         // Add the train directory parameter with the input directory path as an argument,
-        // and specify the "trn" extension for train files.
-        params.append(" -t ").append(inputDirPath).append(" -te trn");
+        // and specify the "input" extension for train files.
+        params.append(" -i ").append(inputDirPath).append(" -ie input");
 
-        // If the boolean is set to true, add the development directory parameter with the
-        // input directory path as an argument, and specify the "dev" extension for train files.
-        if(developBool)
+        params.append(" -oe ").append("out");
+
+        // If a format is given, add the format to the parameters.
+        if(data.getParameter("format") != null)
         {
-            params.append(" -d ").append(inputDirPath).append(" -de dev");
-        }
-
-        if(data.getParameter("mode") != null)
-        {
-            String givenMode = (String) data.getParameter("mode");
-
-            if(!EnumUtils.isValidEnum(NLPMode.class, givenMode))
-            {
-                StringBuilder errorMsg = new StringBuilder("MODE ERROR;");
-                errorMsg.append(givenMode);
-                return errorMsg.toString();
-            }
-            params.append(" -mode ").append(data.getParameter("mode"));
-        }
-
-        // "Name not implemented for Online component."
-        if(data.getParameter("saveModel") != null)
-        {
-            params.append(" -m ").append(outputDirPath).append("/").append(data.getParameter("saveModel")).append(".xz");
-        }
-
-        if(data.getParameter("cv") != null)
-        {
-            params.append(" -cv ").append(data.getParameter("cv"));
+            params.append(" -format ").append(data.getParameter("format"));
         }
 
         // Return the resulting list of parameters to be processed as an array
@@ -469,7 +381,7 @@ public class NLP4JCustomTrain implements ProcessingService
      * @param inputData The input data from which to extract configuration details
      * @return A String representing the path to the created configuration file.
      */
-    protected String makeConfigFile(Path dir, Data<String> inputData) throws IOException
+    public String makeConfigFile(Path dir, Data<String> inputData) throws IOException
     {
         // This will hold the text for the configuration file, which is in XML format.
         StringBuilder configTxt = new StringBuilder("<configuration>\r\n");
@@ -542,7 +454,7 @@ public class NLP4JCustomTrain implements ProcessingService
 
         // START OF LEXICA
         // This is the path for all lexica dependent files
-        String lexicaPath = "src/main/resources/lexica/";
+        String lexicaPath = "lexica/";
 
         // A boolean that will be set to true when the first lexical parameter is set.
         // This is needed because we don't know which, if any, of the components will be
@@ -571,7 +483,7 @@ public class NLP4JCustomTrain implements ProcessingService
             // configuration file using the index that matches the given name
             while((ambiguityTxt == null) && (index < ambiguityNames.length))
             {
-                if(ambiguityNames[index] == givenName)
+                if(ambiguityNames[index].equals(givenName))
                 {
                     ambiguityTxt = new StringBuilder("        <ambiguity_classes field=\"");
                     ambiguityTxt.append(ambiguityFields[index]).append("\">").append(lexicaPath);
@@ -619,7 +531,7 @@ public class NLP4JCustomTrain implements ProcessingService
             // configuration file using the index that matches the given name
             while((clustersTxt == null) && (index < clustersNames.length))
             {
-                if(clustersNames[index] == givenName)
+                if(clustersNames[index].equals(givenName))
                 {
                     clustersTxt = new StringBuilder("        <word_clusters field=\"");
                     clustersTxt.append(clustersFields[index]).append("\">").append(lexicaPath);
@@ -667,7 +579,7 @@ public class NLP4JCustomTrain implements ProcessingService
             // configuration file using the index that matches the given name
             while((NETxt == null) && (index < namedEntityNames.length))
             {
-                if(namedEntityNames[index] == givenName)
+                if(namedEntityNames[index].equals(givenName))
                 {
                     NETxt = new StringBuilder("        <named_entity_gazetteers field=\"");
                     NETxt.append(namedEntityFields[index]).append("\">").append(lexicaPath);
@@ -713,7 +625,7 @@ public class NLP4JCustomTrain implements ProcessingService
             // configuration file using the index that matches the given name
             while((embeddingsTxt == null) && (index < embeddingsNames.length))
             {
-                if(embeddingsNames[index] == givenName)
+                if(embeddingsNames[index].equals(givenName))
                 {
                     embeddingsTxt = new StringBuilder("        <word_embeddings field=\"");
                     embeddingsTxt.append(embeddingsFields[index]).append("\">").append(lexicaPath);
@@ -746,250 +658,48 @@ public class NLP4JCustomTrain implements ProcessingService
         }
         // END OF LEXICA
 
-        // START OF OPTIMIZER
-        if(inputData.getParameter("algorithm") != null)
+        // START OF MODELS
+        boolean modelsSet = false;
+        // This is the path for all lexica dependent files
+        String modelsPath = "models/";
+
+        if(inputData.getParameter("pos") != null)
         {
-            String givenName = (String) inputData.getParameter("algorithm");
-
-            //ArrayList<String> algorithmNames = new ArrayList<>();
-            //algorithmNames.add("perceptron");
-            //algorithmNames.add("softmax-regression");
-            //algorithmNames.add("adagrad");
-            //algorithmNames.add("adagrad-mini-batch");
-            //algorithmNames.add("adagrad-regression");
-            //algorithmNames.add("adadelta-mini-batch");
-
-            //if(algorithmNames.contains(givenName))
-
-            if(!(givenName.equals("perceptron") || givenName.equals("softmax-regression")
-                    || givenName.equals("adagrad") || givenName.equals("adagrad-mini-batch")
-                    || givenName.equals("adagrad-regression") || givenName.equals("adadelta-mini-batch")))
+            if(!modelsSet)
             {
-                StringBuilder errorMsg = new StringBuilder("ALGORITHM ERROR;");
-                errorMsg.append(givenName);
-                return errorMsg.toString();
+                modelsSet = true;
+                configTxt.append("    <models>\r\n");
             }
 
-            else
-            {
-                configTxt.append("    <optimizer>\r\n");
-                configTxt.append("        <algorithm>").append(givenName).append("</algorithm>\r\n");
-                if(inputData.getParameter("regularization") != null)
-                {
-                    String givenNumber = (String) inputData.getParameter("regularization");
-                    configTxt.append("        <l1_regularization>").append(givenNumber).append("</l1_regularization>\r\n");
-                }
-
-                if(inputData.getParameter("rate") != null)
-                {
-                    String givenNumber = (String) inputData.getParameter("rate");
-                    configTxt.append("        <learning_rate>").append(givenNumber).append("</learning_rate>\r\n");
-                }
-
-                if(inputData.getParameter("cutoff") != null)
-                {
-                    String givenNumber = (String) inputData.getParameter("cutoff");
-                    configTxt.append("        <feature_cutoff>").append(givenNumber).append("</feature_cutoff>\r\n");
-                }
-
-                boolean lolsSet = false;
-
-                if(inputData.getParameter("lols-fixed") != null)
-                {
-                    lolsSet = true;
-                    String givenNumber = (String) inputData.getParameter("lols-fixed");
-                    configTxt.append("        <lols fixed=\"").append(givenNumber).append("\"");
-                }
-
-                if(inputData.getParameter("lols-decaying") != null)
-                {
-                    String givenNumber = (String) inputData.getParameter("lols-decaying");
-
-                    if(lolsSet)
-                    {
-                        configTxt.append(" decaying=\"").append(givenNumber).append("\"/>\r\n");
-                    }
-
-                    // This is assuming that one can set decaying without fixed.
-                    // TODO: Check if this is possible
-                    else
-                    {
-                        configTxt.append("        <lols decaying=\"").append(givenNumber).append("\"/>\r\n");
-                    }
-                }
-
-                if(inputData.getParameter("max-epoch") != null)
-                {
-                    String givenNumber = (String) inputData.getParameter("max-epoch");
-                    configTxt.append("        <max_epoch>").append(givenNumber).append("</max_epoch>\r\n");
-                }
-
-                if(inputData.getParameter("batch-size") != null)
-                {
-                    String givenNumber = (String) inputData.getParameter("batch-size");
-                    configTxt.append("        <batch_size>").append(givenNumber).append("</batch_size>\r\n");
-                }
-
-                if(inputData.getParameter("bias") != null)
-                {
-                    String givenNumber = (String) inputData.getParameter("bias");
-                    configTxt.append("        <bias>").append(givenNumber).append("</bias>\r\n");
-                }
-
-                configTxt.append("    </optimizer>\r\n\r\n");
-            }
+            configTxt.append("        <pos>").append(modelsPath).append("en-pos.xz</pos>\r\n");
         }
-        // END OF OPTIMIZER
 
-        // START OF FEATURES
-        // Before starting a counter and examining subsequent feature templates, check if the feature
-        // indexed at 0 is specified, if so create the header for all feature templates then check
-        // for further indices
-        if((inputData.getParameter("1-f0-source") != null)
-                && (inputData.getParameter("1-f0-field") != null))
+        if(inputData.getParameter("ner") != null)
         {
-
-            configTxt.append("    <feature_template>\r\n");
-
-            boolean featureFound = true;
-            boolean lineFound = true;
-
-            // Counter holding the index of the current feature.
-            int f = 0; // NLP4J starts feature indexing at 0
-            // Counter holding the index of the current feature line
-            int i = 1; // Starts at 1 because we are checking for features within the first feature line
-
-            // These Strings will hold the user variables
-            String source, window, relation, field, value;
-
-            // These Strings will hold the name of the parameter to be accessed
-            // They will be changed to look for further features and further lines
-            String sourceKey = "1-f0-source";
-            String windowKey = "1-f0-window";
-            String relationKey = "1-f0-relation";
-            String fieldKey = "1-f0-field";
-            String valueKey = "1-f0-value";
-
-            // These StringBuilders will be used to create the keys when changing the feature number
-            // or line being checked
-            StringBuilder sourceBuilder, windowBuilder, relationBuilder, fieldBuilder, valueBuilder;
-
-            while(lineFound)
+            if(!modelsSet)
             {
-
-                while(featureFound)
-                {
-
-                    if((inputData.getParameter(sourceKey) != null)
-                            && (inputData.getParameter(fieldKey) != null))
-                    {
-                        featureFound = true;
-
-                        configTxt.append(" ");
-                        if(f == 0)
-                        {
-                            configTxt.append("       <feature ");
-                        }
-
-                        source = (String) inputData.getParameter(sourceKey);
-                        if(!EnumUtils.isValidEnum(Source.class, source))
-                        {
-                            StringBuilder errorMsg = new StringBuilder("INVALID FEATURE SOURCE ERROR;");
-                            errorMsg.append(source).append(";").append(i).append(";").append(f);
-                            return errorMsg.toString();
-                        }
-
-                        configTxt.append("f").append(f);
-                        configTxt.append("=\"").append(source);
-
-                        if(inputData.getParameter(windowKey) != null)
-                        {
-                            window = (String) inputData.getParameter(windowKey);
-                            if(!((window.contains("-")) || (window.contains("+"))))
-                            {
-                                configTxt.append("+");
-                            }
-                            configTxt.append(window);
-                        }
-
-                        if(inputData.getParameter(relationKey) != null)
-                        {
-                            relation = (String) inputData.getParameter(relationKey);
-                            if(!EnumUtils.isValidEnum(Relation.class, relation))
-                            {
-                                StringBuilder errorMsg = new StringBuilder("INVALID FEATURE RELATION ERROR;");
-                                errorMsg.append(source).append(";").append(i).append(";").append(f);
-                                return errorMsg.toString();
-                            }
-                            configTxt.append("_").append(relation);
-                        }
-
-                        field = (String) inputData.getParameter(fieldKey);
-                        if(!EnumUtils.isValidEnum(Field.class, field))
-                        {
-                            StringBuilder errorMsg = new StringBuilder("INVALID FEATURE FIELD ERROR;");
-                            errorMsg.append(source).append(";").append(i).append(";").append(f);
-                            return errorMsg.toString();
-                        }
-                        configTxt.append(":").append(field);
-
-                        if(inputData.getParameter(valueKey) != null)
-                        {
-                            value = (String) inputData.getParameter(valueKey);
-                            configTxt.append(":").append(value);
-                        }
-
-                        configTxt.append("\"");
-
-                        f++;
-
-                    }
-
-                    else
-                    {
-                        // If f is not 0, then there has been at least one feature on this line, which
-                        // means this line wasn't empty
-                        if(f != 0)
-                        {
-                            lineFound = true;
-                            featureFound = true;
-                            configTxt.append("/>\r\n");
-                            f = 0;
-                            i++;
-                        }
-
-                        else
-                        {
-                            featureFound = false;
-                            lineFound = false;
-                        }
-                    }
-
-                    sourceBuilder = new StringBuilder();
-                    sourceBuilder.append(i).append("-f").append(f).append("-source");
-                    sourceKey = sourceBuilder.toString();
-
-                    fieldBuilder = new StringBuilder();
-                    fieldBuilder.append(i).append("-f").append(f).append("-field");
-                    fieldKey = fieldBuilder.toString();
-
-                    windowBuilder = new StringBuilder();
-                    windowBuilder.append(i).append("-f").append(f).append("-window");
-                    windowKey = windowBuilder.toString();
-
-                    relationBuilder = new StringBuilder();
-                    relationBuilder.append(i).append("-f").append(f).append("-relation");
-                    relationKey = relationBuilder.toString();
-
-                    valueBuilder = new StringBuilder();
-                    valueBuilder.append(i).append("-f").append(f).append("-value");
-                    valueKey = valueBuilder.toString();
-                }
+                modelsSet = true;
+                configTxt.append("    <models>\r\n");
             }
-            configTxt.append("    </feature_template>\r\n\r\n");
-        }
-        // END OF FEATURES
 
+            configTxt.append("        <ner>").append(modelsPath).append("en-ner.xz</ner>\r\n");
+        }
+
+        if(inputData.getParameter("dep") != null)
+        {
+            if(!modelsSet)
+            {
+                modelsSet = true;
+                configTxt.append("    <models>\r\n");
+            }
+
+            configTxt.append("        <dep>").append(modelsPath).append("en-dep.xz</dep>\r\n");
+        }
+
+        if(modelsSet)
+        {
+            configTxt.append("    </models>\r\n");
+        }
 
         configTxt.append("</configuration>");
 
@@ -1011,6 +721,25 @@ public class NLP4JCustomTrain implements ProcessingService
         data.setDiscriminator(Discriminators.Uri.ERROR);
         data.setPayload(message);
         return data.asPrettyJson();
+    }
+
+
+    /** This method will read a text file from a path, and output its contents as a String.
+     *
+     * @param path The path to the text file that should be read
+     * @return A String representing the contents of the text file.
+     */
+    protected String readFile(String path) throws IOException
+    {
+        StringBuilder output = new StringBuilder();
+        BufferedReader br = new BufferedReader(new FileReader(path));
+        String line = br.readLine();
+        while (line != null) {
+            output.append(line).append("\r\n");
+            line = br.readLine();
+        }
+        br.close();
+        return output.toString();
     }
 
     /** This method creates a temporary text file at a certain directory, and writes

@@ -19,6 +19,6 @@
 	</logger>
 
 	<root level="error">
-		<appender-ref ref="FILEOUT" />
+		<appender-ref ref="FILEOUT"/>
 	</root>
 </configuration>

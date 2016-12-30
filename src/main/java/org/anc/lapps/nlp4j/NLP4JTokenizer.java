@@ -145,12 +145,8 @@ public class NLP4JTokenizer implements ProcessingService
 
             for (List<Token> tokens : tokenizer.segmentize(inputStream)) {
                 for (Token token : tokens) {
-                    tokenString = token.toString();
-                    beginning = inputString.indexOf(tokenString, position);
-                    ending = beginning + tokenString.length();
-                    position = ending;
-                    Annotation ann = view.newAnnotation("tok" + tokNum++, Discriminators.Uri.TOKEN, beginning, ending);
-                    ann.addFeature(Features.Token.WORD, tokenString);
+                    Annotation ann = view.newAnnotation("tok" + tokNum++, Discriminators.Uri.TOKEN, token.getStartOffset(), token.getEndOffset());
+                    ann.addFeature(Features.Token.WORD, token.getWordForm());
                 }
             }
 

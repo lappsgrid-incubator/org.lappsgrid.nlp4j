@@ -92,9 +92,9 @@ public class NLP4JCustomTrainTest
     }
 
     @Test
-    public void testExecuteTrain()
+    public void testExecute()
     {
-        System.out.println("nlp4JCustomTrain.testExecuteTrain");
+        System.out.println("nlp4JCustomTrain.testExecute");
 
         String trainTxt = "";
         String devTxt = "";
